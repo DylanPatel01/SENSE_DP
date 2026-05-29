@@ -11,7 +11,6 @@
 %      for one acquisition — we average across acquisitions per surgeon x tech first)
 %   - Test: Mann-Whitney U (non-parametric, small n)
 %   - Effect size: Hedges' g (bias-corrected, primary outcome)
-%   - Correction: Benjamini-Hochberg FDR across all metric x condition tests
 %
 % Input:
 %   Concatenated physiology_by_group_long.csv files from all acquisitions.
@@ -235,7 +234,7 @@ for m = 1:length(metrics)
         if n_rob >= 2 && n_conv >= 2
             [p, ~, stats] = ranksum(vals_rob, vals_conv, 'alpha', alpha);
             U = stats.ranksum - n_rob*(n_rob+1)/2;
-            interp_str = "Pending FDR";
+            interp_str = "Pending";
         else
             p = NaN; U = NaN;
             interp_str = "g only (n<2 in one group)";
@@ -243,48 +242,22 @@ for m = 1:length(metrics)
 
         new_row = {char(met), char(cond), ...
             mean(vals_rob,'omitnan'), mean(vals_conv,'omitnan'), diff_val, ...
-            U, p, NaN, d, g, abs(g), J, interp_str, n_rob, n_conv, g_note};
+            U, p, d, g, abs(g), J, interp_str, n_rob, n_conv, g_note};
         results_shared = [results_shared; cell2table(new_row, 'VariableNames', ...
             {'Metric','Condition', ...
              'Mean_Robotic','Mean_Conventional','Difference', ...
-             'U_stat','p_uncorrected','p_fdr', ...
+             'U_stat','p_value', ...
              'Cohens_d','Hedges_g','Abs_g','J_correction', ...
              'Interpretation','n_rob','n_conv','g_note'})];
     end
 end
 
-%% -------------------------------------------------------------------------
-%  STEP 5: FDR CORRECTION (Benjamini-Hochberg)
-%% -------------------------------------------------------------------------
-% Applied across all metric x condition combinations simultaneously
-
-valid_idx = ~isnan(results_shared.p_uncorrected);
-p_raw     = results_shared.p_uncorrected(valid_idx);
-n_valid   = sum(valid_idx);
-
-if n_valid > 0
-    [p_sorted, sort_idx] = sort(p_raw);
-    fdr_thresh = (1:n_valid)' / n_valid * alpha;
-    below      = p_sorted <= fdr_thresh;
-
-    if any(below)
-        k_max = find(below, 1, 'last');
-        p_fdr = min(p_sorted(k_max) * n_valid ./ (1:n_valid)', 1);
-    else
-        p_fdr = ones(n_valid, 1);
-    end
-
-    p_fdr_reordered           = NaN(n_valid, 1);
-    p_fdr_reordered(sort_idx) = p_fdr;
-    results_shared.p_fdr(valid_idx) = p_fdr_reordered;
-end
-
 % Assign interpretations
 for i = 1:height(results_shared)
     if strcmp(char(results_shared.Interpretation(i)), 'g only (n<2 in one group)'), continue; end
-    if isnan(results_shared.p_fdr(i)), continue; end
+    if isnan(results_shared.p_value(i)), continue; end
 
-    p   = results_shared.p_fdr(i);
+    p   = results_shared.p_value(i);
     g   = results_shared.Abs_g(i);
     dif = results_shared.Difference(i);
 
@@ -361,8 +334,6 @@ fprintf('  ANALYSIS 1 (PHYSIOLOGY): RA-THA vs C-THA\n');
 fprintf('========================================================================\n');
 fprintf('  Metrics: HR (bpm), BR (breaths/min), RMSSD (ms)\n');
 fprintf('  Unit of analysis: surgeon (averaged across acquisitions)\n');
-fprintf('  FDR correction: Benjamini-Hochberg across %d tests (%d metrics x %d conditions)\n', ...
-    length(metrics)*length(shared_conditions), length(metrics), length(shared_conditions));
 fprintf('  Effect size: Hedges'' g  |  Trivial<0.2, Small 0.2-0.5, Medium 0.5-0.8, Large>=0.8\n');
 fprintf('------------------------------------------------------------------------\n');
 
@@ -399,10 +370,10 @@ fprintf('=======================================================================
 for m = 1:length(metrics)
     met = string(metrics{m});
     fprintf('\n  Metric: %s\n', char(met));
-    fprintf('  %-22s %6s %6s %12s %12s %12s %7s %7s %8s %8s  %-30s\n', ...
+    fprintf('  %-22s %6s %6s %12s %12s %12s %7s %7s %8s  %-30s\n', ...
         'Condition', 'n_Rob', 'n_Con', 'Mean_Rob', 'Mean_Con', 'Diff', ...
-        'd', 'g', 'p_raw', 'p_fdr', 'Result');
-    fprintf('  %s\n', repmat('-', 1, 140));
+        'd', 'g', 'p_value', 'Result');
+    fprintf('  %s\n', repmat('-', 1, 130));
 
     for c = 1:length(shared_conditions)
         cond = string(shared_conditions{c});
@@ -411,18 +382,16 @@ for m = 1:length(metrics)
         if ~any(mask), continue; end
         row = results_shared(mask, :);
 
-        if isnan(row.p_uncorrected)
-            p_raw_str = '     N/A ';
-            p_fdr_str = '     N/A ';
+        if isnan(row.p_value)
+            p_val_str = '     N/A ';
         else
-            p_raw_str = sprintf('%8.4f', row.p_uncorrected);
-            p_fdr_str = sprintf('%8.4f', row.p_fdr);
+            p_val_str = sprintf('%8.4f', row.p_value);
         end
 
-        fprintf('  %-22s %6d %6d %12.4f %12.4f %12.4f %7.3f %7.3f %s %s  %s\n', ...
+        fprintf('  %-22s %6d %6d %12.4f %12.4f %12.4f %7.3f %7.3f %s  %s\n', ...
             char(cond), row.n_rob, row.n_conv, ...
             row.Mean_Robotic, row.Mean_Conventional, row.Difference, ...
-            row.Cohens_d, row.Hedges_g, p_raw_str, p_fdr_str, ...
+            row.Cohens_d, row.Hedges_g, p_val_str, ...
             char(row.Interpretation));
     end
 end
@@ -453,9 +422,9 @@ if any(notable_mask)
     [~, sidx] = sort(T_note.Abs_g, 'descend');
     T_note = T_note(sidx, :);
     for i = 1:height(T_note)
-        fprintf('  [%s | %s]  g=%.3f  p_raw=%.4f  p_fdr=%.4f  — %s\n', ...
+        fprintf('  [%s | %s]  g=%.3f  p=%.4f  — %s\n', ...
             T_note.Metric{i}, T_note.Condition{i}, ...
-            T_note.Hedges_g(i), T_note.p_uncorrected(i), T_note.p_fdr(i), ...
+            T_note.Hedges_g(i), T_note.p_value(i), ...
             char(T_note.Interpretation(i)));
     end
 else
@@ -470,5 +439,4 @@ fprintf('  SD within physiology_by_group.m reflects within-epoch sample variance
 fprintf('  not used here. Between-surgeon SD used for Hedges'' g.\n');
 fprintf('  RMSSD = sqrt(mean(diff(RR)^2)) — approximated from HR-derived RR intervals.\n');
 fprintf('  Higher RMSSD = greater HRV = lower physiological stress.\n');
-fprintf('  FDR applied across %d simultaneous tests.\n', n_valid);
 fprintf('\nDone.\n');
