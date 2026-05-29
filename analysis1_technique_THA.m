@@ -7,7 +7,6 @@
 %   - Regions: 8 brain regions
 %   - Conditions: shared_same, shared_diff, robotic_only, conventional_only
 %   - Test: Mann-Whitney U (non-parametric, small n)
-%   - Correction: Benjamini-Hochberg FDR across all region x condition tests
 %   - Effect size: Hedges' g (bias-corrected Cohen's d, appropriate for small n)
 %
 % Hedges' g formula:
@@ -118,11 +117,11 @@ for c = 1:length(shared_conditions)
             new_row = {cond, char(reg), reg_label, ...
                 mean(betas_rob,'omitnan'), mean(betas_conv,'omitnan'), ...
                 mean(betas_rob,'omitnan') - mean(betas_conv,'omitnan'), ...
-                NaN, NaN, NaN, NaN, NaN, NaN, NaN, "Insufficient data", n_rob, n_conv};
+                NaN, NaN, NaN, NaN, NaN, NaN, "Insufficient data", n_rob, n_conv};
             results_shared = [results_shared; cell2table(new_row, 'VariableNames', ...
                 {'Condition','Region','Region_Label', ...
                  'Mean_Robotic','Mean_Conventional','Difference', ...
-                 'U_stat','p_uncorrected','p_fdr', ...
+                 'U_stat','p_value', ...
                  'Cohens_d','Hedges_g','Abs_g','J_correction', ...
                  'Interpretation','n_rob','n_conv'})];
             continue;
@@ -143,45 +142,22 @@ for c = 1:length(shared_conditions)
 
         new_row = {cond, char(reg), reg_label, ...
             mean(betas_rob), mean(betas_conv), difference, ...
-            U, p, NaN, d, g, abs(g), J, ...
-            "Pending FDR", n_rob, n_conv};
+            U, p, d, g, abs(g), J, ...
+            "Pending", n_rob, n_conv};
         results_shared = [results_shared; cell2table(new_row, 'VariableNames', ...
             {'Condition','Region','Region_Label', ...
              'Mean_Robotic','Mean_Conventional','Difference', ...
-             'U_stat','p_uncorrected','p_fdr', ...
+             'U_stat','p_value', ...
              'Cohens_d','Hedges_g','Abs_g','J_correction', ...
              'Interpretation','n_rob','n_conv'})];
     end
 end
 
-%% -------------------------------------------------------------------------
-%  FDR CORRECTION (Benjamini-Hochberg)
-%% -------------------------------------------------------------------------
-
-valid_idx = ~isnan(results_shared.p_uncorrected);
-p_raw     = results_shared.p_uncorrected(valid_idx);
-n_valid   = sum(valid_idx);
-
-[p_sorted, sort_idx] = sort(p_raw);
-fdr_thresh = (1:n_valid)' / n_valid * alpha;
-below      = p_sorted <= fdr_thresh;
-
-if any(below)
-    k_max = find(below, 1, 'last');
-    p_fdr = min(p_sorted(k_max) * n_valid ./ (1:n_valid)', 1);
-else
-    p_fdr = ones(n_valid, 1);
-end
-
-p_fdr_reordered           = NaN(n_valid, 1);
-p_fdr_reordered(sort_idx) = p_fdr;
-results_shared.p_fdr(valid_idx) = p_fdr_reordered;
-
 % Assign interpretations
 for i = 1:height(results_shared)
-    if isnan(results_shared.p_fdr(i)), continue; end
+    if isnan(results_shared.p_value(i)), continue; end
 
-    p   = results_shared.p_fdr(i);
+    p   = results_shared.p_value(i);
     g   = results_shared.Abs_g(i);
     dif = results_shared.Difference(i);
 
@@ -267,7 +243,6 @@ fprintf('\n');
 fprintf('========================================================================\n');
 fprintf('  ANALYSIS 1: RA-THA vs C-THA — SHARED CONDITIONS\n');
 fprintf('========================================================================\n');
-fprintf('  FDR: Benjamini-Hochberg (alpha=%.2f)  |  Effect: Hedges'' g\n', alpha);
 fprintf('  Benchmarks: Trivial<0.2, Small 0.2-0.5, Medium 0.5-0.8, Large>=0.8\n');
 fprintf('  Significance: * p<.05  ** p<.01  *** p<.001  ns = not significant\n');
 fprintf('  J correction factor applied (df = n_rob + n_conv - 2 = %d)\n', ...
@@ -280,27 +255,27 @@ for c = 1:length(shared_conditions)
     T_c  = results_shared(mask, :);
 
     % Sort by raw p-value
-    [~, sidx] = sort(T_c.p_uncorrected);
+    [~, sidx] = sort(T_c.p_value);
     T_c = T_c(sidx, :);
 
     fprintf('\n  Condition: %s\n', upper(cond));
-    fprintf('  %-40s %6s %6s %12s %12s %12s %8s %8s %7s %7s  %s\n', ...
+    fprintf('  %-40s %6s %6s %12s %12s %12s %8s %7s %7s  %s\n', ...
         'Region', 'n_Rob', 'n_Con', 'Mean_Rob', 'Mean_Con', 'Diff', ...
-        'p_raw', 'p_fdr', 'd', 'g', 'Result');
-    fprintf('  %s\n', repmat('-', 1, 145));
+        'p_value', 'd', 'g', 'Result');
+    fprintf('  %s\n', repmat('-', 1, 135));
 
     for i = 1:height(T_c)
-        if T_c.p_uncorrected(i) < 0.05
-            flag = ' <-- p<.05 uncorrected';
-        elseif T_c.p_uncorrected(i) < 0.10
+        if T_c.p_value(i) < 0.05
+            flag = ' <-- p<.05';
+        elseif T_c.p_value(i) < 0.10
             flag = ' <-- trend (p<.10)';
         else
             flag = '';
         end
-        fprintf('  %-40s %6d %6d %12.4e %12.4e %12.4e %8.4f %8.4f %7.3f %7.3f  %s%s\n', ...
+        fprintf('  %-40s %6d %6d %12.4e %12.4e %12.4e %8.4f %7.3f %7.3f  %s%s\n', ...
             T_c.Region_Label{i}, T_c.n_rob(i), T_c.n_conv(i), ...
             T_c.Mean_Robotic(i), T_c.Mean_Conventional(i), T_c.Difference(i), ...
-            T_c.p_uncorrected(i), T_c.p_fdr(i), ...
+            T_c.p_value(i), ...
             T_c.Cohens_d(i), T_c.Hedges_g(i), ...
             char(T_c.Interpretation(i)), flag);
     end
@@ -322,19 +297,19 @@ end
 
 fprintf('\n');
 fprintf('========================================================================\n');
-fprintf('  SIGNIFICANT FINDINGS AFTER FDR CORRECTION\n');
+fprintf('  SIGNIFICANT FINDINGS (p < %.2f)\n', alpha);
 fprintf('========================================================================\n');
-sig_mask = results_shared.p_fdr < alpha;
+sig_mask = results_shared.p_value < alpha;
 if any(sig_mask)
     T_sig = results_shared(sig_mask, :);
     for i = 1:height(T_sig)
-        fprintf('  [%s] %s: p_fdr=%.4f, g=%.3f (d=%.3f, J=%.3f) — %s\n', ...
-            T_sig.Condition{i}, T_sig.Region_Label{i}, T_sig.p_fdr(i), ...
+        fprintf('  [%s] %s: p=%.4f, g=%.3f (d=%.3f, J=%.3f) — %s\n', ...
+            T_sig.Condition{i}, T_sig.Region_Label{i}, T_sig.p_value(i), ...
             T_sig.Hedges_g(i), T_sig.Cohens_d(i), T_sig.J_correction(i), ...
             char(T_sig.Interpretation(i)));
     end
 else
-    fprintf('  No significant differences after FDR correction.\n');
+    fprintf('  No significant differences (p < %.2f).\n', alpha);
 end
 
 fprintf('\n========================================================================\n');
