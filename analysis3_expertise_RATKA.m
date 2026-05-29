@@ -14,12 +14,6 @@
 %   Expert : 1 (n=2 proc), 2 (n=3 proc), 3 (n=1 proc), 4 (n=1 proc) — 4 surgeons
 %   Novice : 5 (n=1 proc), 7 (n=1 proc)                               — 2 surgeons
 %
-% IMPORTANT POWER NOTE:
-%   With n=4 experts vs n=2 novices, the minimum achievable Mann-Whitney p-value
-%   is 0.133. Statistical significance is therefore not achievable regardless of
-%   the true effect. Hedges' g is the primary outcome; p-values are reported
-%   for completeness only and should not be used to draw inferential conclusions.
-%
 % Input:  master_grouped_region_HbDiff.csv (from synthesise_betas_grouped_SD.m)
 % Output: analysis3_shared_conditions_HbDiff.csv   (shared_same, shared_diff)
 %         analysis3_unique_conditions_HbDiff.csv    (robotic_only)
@@ -212,7 +206,7 @@ for c = 1:length(all_conditions)
         if n_exp >= 2 && n_nov >= 2
             [p, ~, stats] = ranksum(betas_exp, betas_nov, 'alpha', alpha);
             U = stats.ranksum - n_exp*(n_exp+1)/2;
-            interp_str = "Pending FDR";
+            interp_str = "Pending";
         else
             p = NaN; U = NaN;
             interp_str = "g only (n<2 in one group)";
@@ -220,44 +214,19 @@ for c = 1:length(all_conditions)
 
         new_row = {cond, char(reg), reg_label, ...
             mean(betas_exp,'omitnan'), mean(betas_nov,'omitnan'), diff_val, ...
-            U, p, NaN, d, g, abs(g), J, interp_str, n_exp, n_nov, g_note};
+            U, p, d, g, abs(g), J, interp_str, n_exp, n_nov, g_note};
         results = [results; cell2table(new_row, 'VariableNames', ...
             {'Condition','Region','Region_Label', ...
              'Mean_Expert','Mean_Novice','Difference', ...
-             'U_stat','p_uncorrected','p_fdr', ...
+             'U_stat','p_value', ...
              'Cohens_d','Hedges_g','Abs_g','J_correction', ...
              'Interpretation','n_exp','n_nov','g_note'})];
     end
 end
 
-%% -------------------------------------------------------------------------
-%  FDR CORRECTION (Benjamini-Hochberg, all conditions where p was computed)
-%% -------------------------------------------------------------------------
-
-valid_idx = ~isnan(results.p_uncorrected);
-p_raw     = results.p_uncorrected(valid_idx);
-n_valid   = sum(valid_idx);
-
-if n_valid > 0
-    [p_sorted, sort_idx] = sort(p_raw);
-    fdr_thresh = (1:n_valid)' / n_valid * alpha;
-    below      = p_sorted <= fdr_thresh;
-
-    if any(below)
-        k_max = find(below, 1, 'last');
-        p_fdr = min(p_sorted(k_max) * n_valid ./ (1:n_valid)', 1);
-    else
-        p_fdr = ones(n_valid, 1);
-    end
-
-    p_fdr_reordered           = NaN(n_valid, 1);
-    p_fdr_reordered(sort_idx) = p_fdr;
-    results.p_fdr(valid_idx)  = p_fdr_reordered;
-end
-
 % Assign interpretations
 for i = 1:height(results)
-    if isnan(results.p_fdr(i)) || ~strcmp(char(results.Interpretation(i)), 'Pending FDR')
+    if isnan(results.p_value(i)) || ~strcmp(char(results.Interpretation(i)), 'Pending')
         % For g-only rows (unique conditions or n<2), assign effect label without significance
         if ~isnan(results.Abs_g(i))
             g   = results.Abs_g(i);
@@ -271,7 +240,7 @@ for i = 1:height(results)
             elseif dif < 0,  dir = "Novice > Expert";
             else,            dir = "No difference";
             end
-            if strcmp(char(results.Interpretation(i)), 'Pending FDR')
+            if strcmp(char(results.Interpretation(i)), 'Pending')
                 results.Interpretation(i) = "ns | " + eff + " | " + dir;
             else
                 results.Interpretation(i) = results.Interpretation(i) + ...
@@ -281,7 +250,7 @@ for i = 1:height(results)
         continue;
     end
 
-    p   = results.p_fdr(i);
+    p   = results.p_value(i);
     g   = results.Abs_g(i);
     dif = results.Difference(i);
 
@@ -399,7 +368,6 @@ fprintf('=======================================================================
 fprintf('  HEDGES'' g + MANN-WHITNEY U — ALL CONDITIONS\n');
 fprintf('========================================================================\n');
 fprintf('  Benchmarks: Trivial<0.2, Small 0.2-0.5, Medium 0.5-0.8, Large>=0.8\n');
-fprintf('  FDR: Benjamini-Hochberg across ALL condition tests (where n>=2 per group)\n');
 fprintf('  p = N/A only where one group has n<2\n');
 fprintf('------------------------------------------------------------------------\n');
 
@@ -416,24 +384,22 @@ for c = 1:length(all_conditions)
 
     fprintf('\n  Condition: %s\n', upper(cond));
 
-    fprintf('  %-40s %6s %6s %12s %12s %12s %7s %7s %8s %8s  %-30s  %s\n', ...
+    fprintf('  %-40s %6s %6s %12s %12s %12s %7s %7s %8s  %-30s  %s\n', ...
         'Region', 'n_Exp', 'n_Nov', 'Mean_Exp', 'Mean_Nov', 'Diff', ...
-        'd', 'g', 'p_raw', 'p_fdr', 'Result', 'Note');
-    fprintf('  %s\n', repmat('-', 1, 175));
+        'd', 'g', 'p_value', 'Result', 'Note');
+    fprintf('  %s\n', repmat('-', 1, 165));
 
     for i = 1:height(T_c)
-        if isnan(T_c.p_uncorrected(i))
-            p_raw_str = '     N/A ';
-            p_fdr_str = '     N/A ';
+        if isnan(T_c.p_value(i))
+            p_val_str = '     N/A ';
         else
-            p_raw_str = sprintf('%8.4f', T_c.p_uncorrected(i));
-            p_fdr_str = sprintf('%8.4f', T_c.p_fdr(i));
+            p_val_str = sprintf('%8.4f', T_c.p_value(i));
         end
-        fprintf('  %-40s %6d %6d %12.4e %12.4e %12.4e %7.3f %7.3f %s %s  %-30s  %s\n', ...
+        fprintf('  %-40s %6d %6d %12.4e %12.4e %12.4e %7.3f %7.3f %s  %-30s  %s\n', ...
             T_c.Region_Label{i}, T_c.n_exp(i), T_c.n_nov(i), ...
             T_c.Mean_Expert(i), T_c.Mean_Novice(i), T_c.Difference(i), ...
             T_c.Cohens_d(i), T_c.Hedges_g(i), ...
-            p_raw_str, p_fdr_str, ...
+            p_val_str, ...
             char(T_c.Interpretation(i)), char(T_c.g_note(i)));
     end
 end
@@ -468,5 +434,4 @@ fprintf('  Positive g/difference = Expert > Novice activation.\n');
 fprintf('  Negative g/difference = Novice > Expert activation.\n');
 fprintf('  p-values included for completeness but should not be used inferentially.\n');
 fprintf('  Mann-Whitney U computed for all conditions where n>=2 per group.\n');
-fprintf('  FDR (Benjamini-Hochberg) applied across all valid p-values.\n');
 fprintf('\nDone.\n');
