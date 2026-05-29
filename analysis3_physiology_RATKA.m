@@ -9,7 +9,6 @@
 %   - Conditions: shared_same, shared_diff, robotic_only
 %   - Effect size: Hedges' g (primary outcome)
 %   - Test: Mann-Whitney U (reported with power caveat — n=4 vs n=2)
-%   - FDR: Benjamini-Hochberg across metric x condition tests
 %
 % Surgeon classification (RA-TKA):
 %   Expert : 1, 2, 3, 4  (n=4 surgeons)
@@ -336,7 +335,7 @@ for m = 1:length(metrics)
         if is_shared && n_exp >= 2 && n_nov >= 2
             [p, ~, stats] = ranksum(vals_exp, vals_nov, 'alpha', alpha);
             U = stats.ranksum - n_exp*(n_exp+1)/2;
-            interp_str = "Pending FDR";
+            interp_str = "Pending";
         else
             p = NaN; U = NaN;
             if ~is_shared
@@ -348,42 +347,19 @@ for m = 1:length(metrics)
 
         new_row = {char(met), char(cond), ...
             mean(vals_exp,'omitnan'), mean(vals_nov,'omitnan'), diff_val, ...
-            U, p, NaN, d, g, abs(g), J, interp_str, n_exp, n_nov, g_note};
+            U, p, d, g, abs(g), J, interp_str, n_exp, n_nov, g_note};
         results = [results; cell2table(new_row, 'VariableNames', ...
             {'Metric','Condition', ...
              'Mean_Expert','Mean_Novice','Difference', ...
-             'U_stat','p_uncorrected','p_fdr', ...
+             'U_stat','p_value', ...
              'Cohens_d','Hedges_g','Abs_g','J_correction', ...
              'Interpretation','n_exp','n_nov','g_note'})];
     end
 end
 
-%% -------------------------------------------------------------------------
-%  FDR CORRECTION (shared conditions only)
-%% -------------------------------------------------------------------------
-
-valid_idx = ~isnan(results.p_uncorrected);
-p_raw     = results.p_uncorrected(valid_idx);
-n_valid   = sum(valid_idx);
-
-if n_valid > 0
-    [p_sorted, sort_idx] = sort(p_raw);
-    fdr_thresh = (1:n_valid)' / n_valid * alpha;
-    below      = p_sorted <= fdr_thresh;
-    if any(below)
-        k_max = find(below, 1, 'last');
-        p_fdr = min(p_sorted(k_max) * n_valid ./ (1:n_valid)', 1);
-    else
-        p_fdr = ones(n_valid, 1);
-    end
-    p_fdr_reordered           = NaN(n_valid, 1);
-    p_fdr_reordered(sort_idx) = p_fdr;
-    results.p_fdr(valid_idx)  = p_fdr_reordered;
-end
-
 % Assign interpretations
 for i = 1:height(results)
-    if isnan(results.p_fdr(i)) || ~strcmp(char(results.Interpretation(i)), 'Pending FDR')
+    if isnan(results.p_value(i)) || ~strcmp(char(results.Interpretation(i)), 'Pending')
         % For g-only rows, assign effect label without significance
         if ~isnan(results.Abs_g(i))
             g = results.Abs_g(i);
@@ -397,7 +373,7 @@ for i = 1:height(results)
             elseif dif < 0,  dir = "Novice > Expert";
             else,            dir = "No difference";
             end
-            if strcmp(char(results.Interpretation(i)), 'Pending FDR')
+            if strcmp(char(results.Interpretation(i)), 'Pending')
                 results.Interpretation(i) = "ns | " + eff + " | " + dir;
             else
                 results.Interpretation(i) = results.Interpretation(i) + ...
@@ -407,7 +383,7 @@ for i = 1:height(results)
         continue;
     end
 
-    p   = results.p_fdr(i);
+    p   = results.p_value(i);
     g   = results.Abs_g(i);
     dif = results.Difference(i);
 
@@ -488,21 +464,20 @@ fprintf('=======================================================================
 for m = 1:length(metrics)
     met = string(metrics{m});
     fprintf('\n  Metric: %s\n', char(met));
-    fprintf('  %-22s %6s %6s %12s %12s %12s %7s %7s %8s %8s  %-30s\n', ...
+    fprintf('  %-22s %6s %6s %12s %12s %12s %7s %7s %8s  %-30s\n', ...
         'Condition','n_Exp','n_Nov','Mean_Exp','Mean_Nov','Diff', ...
-        'd','g','p_raw','p_fdr','Result');
-    fprintf('  %s\n', repmat('-', 1, 140));
+        'd','g','p_value','Result');
+    fprintf('  %s\n', repmat('-', 1, 130));
     for c = 1:length(all_conditions)
         cond = string(all_conditions{c});
         mask = strcmp(results.Metric,char(met)) & strcmp(results.Condition,char(cond));
         if ~any(mask), continue; end
         row = results(mask,:);
-        if isnan(row.p_uncorrected), p_r = '     N/A '; else, p_r = sprintf('%8.4f',row.p_uncorrected); end
-        if isnan(row.p_fdr),         p_f = '     N/A '; else, p_f = sprintf('%8.4f',row.p_fdr); end
-        fprintf('  %-22s %6d %6d %12.4f %12.4f %12.4f %7.3f %7.3f %s %s  %s\n', ...
+        if isnan(row.p_value), p_val = '     N/A '; else, p_val = sprintf('%8.4f',row.p_value); end
+        fprintf('  %-22s %6d %6d %12.4f %12.4f %12.4f %7.3f %7.3f %s  %s\n', ...
             char(cond), row.n_exp, row.n_nov, ...
             row.Mean_Expert, row.Mean_Novice, row.Difference, ...
-            row.Cohens_d, row.Hedges_g, p_r, p_f, char(row.Interpretation));
+            row.Cohens_d, row.Hedges_g, p_val, char(row.Interpretation));
     end
 end
 
